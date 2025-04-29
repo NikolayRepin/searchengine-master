@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.1.xsd">
+
+    <changeSet id="createSiteTable" author="search-engine">
+        <createTable tableName="site">
+            <column name="id" type="SERIAL">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="status" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status_time" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_error" type="TEXT"/>
+            <column name="url" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="createPageTable" author="search-engine">
+        <createTable tableName="page">
+            <column name="id" type="SERIAL">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="site_id" type="INT">
+                <constraints nullable="false"
+                             foreignKeyName="fk_page_site"
+                             references="site(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="path" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="code" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="content" type="MEDIUMTEXT">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+    
+    <changeSet id="createPathIndex" author="search-engine">
+        <createIndex tableName="page" indexName="index_page_path">
+            <column name="path"/>
+        </createIndex>
+    </changeSet>
+
+
+    <changeSet id="createLemmaTable" author="search-engine">
+        <createTable tableName="lemma">
+            <column name="id" type="SERIAL">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="site_id" type="INT">
+                <constraints nullable="false"
+                             foreignKeyName="fk_lemma_site"
+                             references="site(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="lemma" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="frequency" type="INT">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="createIndexTable" author="search-engine">
+        <createTable tableName="index">
+            <column name="id" type="SERIAL">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="page_id" type="INT">
+                <constraints nullable="false"
+                             foreignKeyName="fk_index_page"
+                             references="page(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="lemma_id" type="INT">
+                <constraints nullable="false"
+                             foreignKeyName="fk_index_lemma"
+                             referencedTableName="lemma"
+                             references="lemma(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="rank" type="FLOAT">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+
+</databaseChangeLog>
