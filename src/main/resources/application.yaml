@@ -27,10 +27,10 @@ indexing-settings:
       name: volochek.life
     - url: https://ruweb.net
       name: RuWeb.ru
-    - url: https://www.svetlovka.ru
-      name: Svetlovka
-#    - url: https://www.playback.ru
-#      name: PlayBack.Ru
+#    - url: https://www.svetlovka.ru
+#      name: Svetlovka
+    - url: https://www.playback.ru
+      name: PlayBack.Ru
   user-agent: HeliontSearchBot
   referrer: http://www.google.com
   request-delay: 1000

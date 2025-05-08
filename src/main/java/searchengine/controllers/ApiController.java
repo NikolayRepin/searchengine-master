@@ -39,12 +39,8 @@ public class ApiController {
 
     @ResponseStatus(HttpStatus.OK)
     @PostMapping("/indexPage")
-    public ResponseBoolean indexPage() {
-
-        // TODO доделать
-
-
-        return new ResponseBoolean();
+    public ResponseBoolean indexPage(@RequestBody String urlPage) {
+        return indexingSiteService.indexPage(urlPage);
     }
 
 }

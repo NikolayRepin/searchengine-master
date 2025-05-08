@@ -1,5 +1,6 @@
 package searchengine.util;
 
+import liquibase.pro.packaged.P;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Connection;
 import org.jsoup.HttpStatusException;
@@ -7,11 +8,10 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.transaction.annotation.Transactional;
 import searchengine.config.SitesList;
-import searchengine.model.Lemma;
-import searchengine.model.Page;
-import searchengine.model.SiteEntity;
-import searchengine.model.StatusIndexingSite;
+import searchengine.model.*;
+import searchengine.repository.IndexRepository;
 import searchengine.repository.LemmaRepository;
 import searchengine.repository.PageRepository;
 import searchengine.repository.SiteRepository;
@@ -32,19 +32,21 @@ public class PageCrawlerTask extends RecursiveAction {
     private final PageRepository pageRepository;
     private final SiteRepository siteRepository;
     private final LemmaRepository lemmaRepository;
+    private final IndexRepository indexRepository;
     private final SitesList sitesList;
     private final SiteEntity siteEntity;
     private static Set<String> visitedSite = ConcurrentHashMap.newKeySet();
     private static final Pattern FILE_PATTERN = Pattern
-            .compile(".*\\.(jpg|jpeg|png|gif|bmp|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|tar|gz|7z|mp3|wav|mp4|mkv|avi|mov|sql)$", Pattern.CASE_INSENSITIVE);
+            .compile(".*\\.(jpg|jpeg|png|gif|bmp|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|tar|gz|7z|mp3|wav|mp4|mkv|avi|mov|sql|webp|svg)$", Pattern.CASE_INSENSITIVE);
 
 
-    public PageCrawlerTask(String url, String defaultUrl, PageRepository pageRepository, SiteRepository siteRepository, LemmaRepository lemmaRepository, SitesList sitesList, SiteEntity siteEntity) throws IOException {
+    public PageCrawlerTask(String url, String defaultUrl, PageRepository pageRepository, SiteRepository siteRepository, LemmaRepository lemmaRepository, IndexRepository indexRepository, SitesList sitesList, SiteEntity siteEntity) {
         this.url = url;
         this.defaultUrl = defaultUrl;
         this.pageRepository = pageRepository;
         this.siteRepository = siteRepository;
         this.lemmaRepository = lemmaRepository;
+        this.indexRepository = indexRepository;
         this.sitesList = sitesList;
         this.siteEntity = siteEntity;
 
@@ -52,6 +54,8 @@ public class PageCrawlerTask extends RecursiveAction {
 
     @Override
     protected void compute() {
+
+
         if (visitedSite.contains(url)) {
             return;
         }
@@ -65,12 +69,36 @@ public class PageCrawlerTask extends RecursiveAction {
         page.setPath(url.substring(siteEntity.getUrl().length()));
         try {
             Connection.Response response = connection();
+
             updateStatusTime();
             page.setSite(siteEntity);
             page.setCode(response.statusCode());
             page.setContent(response.body().replace("\u0000", ""));
             log.info("Сохранение страницы {}", url);
             pageRepository.save(page);
+
+            LemmaFinder lemmaFinder = LemmaFinder.getInstance();
+            Map<String, Integer> allLem = lemmaFinder.collectLemmas(page.getContent());
+
+            for (Map.Entry<String, Integer> entry : allLem.entrySet()) {
+                String lemmaText = entry.getKey();
+                int countLemma = entry.getValue();
+                Lemma lemma = lemmaRepository.findByLemmaAndSiteId(lemmaText, siteEntity);
+                if (lemma == null) {
+                    lemma = new Lemma();
+                    lemma.setLemma(lemmaText);
+                    lemma.setSiteId(siteEntity);
+                    lemma.setFrequency(1);
+                } else {
+                    lemma.setFrequency(lemma.getFrequency() + 1);
+                }
+                lemmaRepository.save(lemma);
+                Index index = new Index();
+                index.setPageId(page);
+                index.setLemmaId(lemma);
+                index.setRank(countLemma);
+                indexRepository.save(index);
+            }
 
 
             Document doc = response.parse();
@@ -83,7 +111,7 @@ public class PageCrawlerTask extends RecursiveAction {
                 }
                 String href = element.attr("abs:href").trim();
                 if (isValid(href)) {
-                    PageCrawlerTask pageCrawlerTask = new PageCrawlerTask(href, defaultUrl, pageRepository, siteRepository, lemmaRepository, sitesList, siteEntity);
+                    PageCrawlerTask pageCrawlerTask = new PageCrawlerTask(href, defaultUrl, pageRepository, siteRepository, lemmaRepository, indexRepository, sitesList, siteEntity);
                     pageCrawlerTask.fork();
                     tasks.add(pageCrawlerTask);
                 }
@@ -114,6 +142,7 @@ public class PageCrawlerTask extends RecursiveAction {
             e.printStackTrace();
             log.error("Ошибка ввода-вывода {}", url, e.getMessage());
         }
+
     }
 
     private boolean isValid(String url) {
@@ -142,7 +171,7 @@ public class PageCrawlerTask extends RecursiveAction {
         page.setSite(siteEntity);
         page.setPath(url.substring(siteEntity.getUrl().length()));
         page.setCode(404);
-        page.setContent("Ошибка 404");
+        page.setContent("");
         pageRepository.save(page);
     }
 
@@ -168,11 +197,6 @@ public class PageCrawlerTask extends RecursiveAction {
 
     public static void clearVisitedSite() {
         visitedSite.clear();
-    }
-
-    public String cleanHtmlCode(String str) {
-        String text = Jsoup.parse(str).text();
-        return text;
     }
 
 
