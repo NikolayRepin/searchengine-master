@@ -17,11 +17,11 @@ public class Index {
 
     @ManyToOne
     @JoinColumn(name = "page_id")
-    private Page pageId;
+    private Page page;
 
     @ManyToOne
     @JoinColumn(name = "lemma_id")
-    private Lemma lemmaId;
+    private Lemma lemma;
 
     @Column(name = "rank")
     public float rank;

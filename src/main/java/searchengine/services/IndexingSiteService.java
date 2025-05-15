@@ -4,12 +4,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import searchengine.config.Site;
 import searchengine.config.SitesList;
 import searchengine.dto.statistics.response.ResponseBoolean;
 import searchengine.dto.statistics.response.ResponseError;
+import searchengine.dto.statistics.response.ResponseSearch;
+import searchengine.dto.statistics.response.SearchResult;
 import searchengine.model.*;
 import searchengine.repository.IndexRepository;
 import searchengine.repository.LemmaRepository;
@@ -18,16 +21,16 @@ import searchengine.repository.SiteRepository;
 import searchengine.util.LemmaFinder;
 import searchengine.util.PageCrawlerTask;
 
+import java.awt.image.ImageObserver;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -161,29 +164,127 @@ public class IndexingSiteService {
         return new ResponseBoolean(true);
     }
 
+    public ResponseBoolean search(String query, String siteUrl, Integer offset, Integer limit) {
+        if (query.isEmpty()) {
+            return new ResponseError(false, "Задан пустой поисковый запрос");
+        }
+
+        SiteEntity siteEntity = siteRepository.findByUrl(siteUrl);
+        if (siteEntity == null) {
+            return new ResponseError(false, "Указанный сайт не найден");
+        }
+        Set<Lemma> filteredLemmas = getRelevantLemma(query, siteEntity);
+        if (filteredLemmas.isEmpty()) {
+            return new ResponseError(false, "Ничего не найдено");
+        }
+
+        List<Index> index = indexRepository.findByLemma(filteredLemmas.iterator().next());
+        Set<Page> resultPages = index.stream()
+                .map(Index::getPage)
+                .collect(Collectors.toSet());
+        int count = 0;
+        for (Lemma lemma : filteredLemmas) {
+            if (count >= 1) {
+                index = indexRepository.findByLemma(lemma);
+                Set<Page> currentPage = index.stream()
+                        .map(Index::getPage)
+                        .collect(Collectors.toSet());
+                if (resultPages.isEmpty()) {
+                    break;
+                }
+                resultPages.retainAll(currentPage);
+            }
+            count++;
+        }
+
+        Map<Page, Float> absoluteRelevancePage = calculateAbsoluteRelevance(resultPages, filteredLemmas);
+        float maxAbsoluteRelevance = absoluteRelevancePage.values().stream()
+                .max(Float::compare).orElse(1.0f);
+
+        List<Page> sortedPages = resultPages.stream()
+                .sorted((p1, p2) -> Float.compare(
+                        absoluteRelevancePage.get(p2) / maxAbsoluteRelevance,
+                        absoluteRelevancePage.get(p1) / maxAbsoluteRelevance
+                ))
+                .toList();
+
+        List<SearchResult> searchResults = new ArrayList<>();
+        for (Page page : sortedPages) {
+            String siteName = siteEntity.getName();
+            String uri = page.getPath();
+            String title = getTitle(page);
+            String snippet = getSnippet(page, filteredLemmas);
+            float relevance = absoluteRelevancePage.get(page) / maxAbsoluteRelevance;
+            searchResults.add(new SearchResult(siteUrl, siteName, uri, title, snippet, relevance));
+        }
+        return new ResponseSearch(true, searchResults.size(), searchResults);
+    }
+
+    public Set<Lemma> getRelevantLemma(String text, SiteEntity siteEntity) {
+        double percentageOfOccurrence = 0.8;
+        Set<Lemma> filteredLemmas = new TreeSet<>(Comparator.comparing(Lemma::getFrequency).thenComparing(Lemma::getLemma));
+        try {
+            LemmaFinder lemmaFinder = LemmaFinder.getInstance();
+            Set<String> lemmas = lemmaFinder.getLemmaSet(text);
+            Integer countPageBySite = pageRepository.countPageBySite(siteEntity);
+
+            for (String l : lemmas) {
+                Lemma lemma = lemmaRepository.findByLemmaAndSite(l, siteEntity);
+                if (lemma == null) {
+                    continue;
+                }
+                double count = countPageBySite * percentageOfOccurrence;
+                if (lemma.getFrequency() < count) {
+                    filteredLemmas.add(lemma);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return filteredLemmas;
+    }
+
+    public Map<Page, Float> calculateAbsoluteRelevance(Set<Page> resultPages, Set<Lemma> filteredLemma) {
+        Map<Page, Float> absoluteRelevancePage = new HashMap<>();
+        List<Index> indexList = indexRepository.findByPageInAndLemmaIn(resultPages, filteredLemma);
+        Map<Page, List<Index>> pageToIndex = indexList.stream()
+                .collect(Collectors.groupingBy(Index::getPage));
+        for (Page page : resultPages) {
+            List<Index> pageIndex = pageToIndex.getOrDefault(page, Collections.emptyList());
+            float absoluteRelevance = (float) pageIndex.stream()
+                    .mapToDouble(Index::getRank)
+                    .sum();
+            absoluteRelevancePage.put(page, absoluteRelevance);
+        }
+
+        return absoluteRelevancePage;
+    }
+
+
     public void getLemmasAndIndex(Page page, SiteEntity siteEntity) throws IOException {
         LemmaFinder lemmaFinder = LemmaFinder.getInstance();
         Map<String, Integer> allLem = lemmaFinder.collectLemmas(page.getContent());
         for (Map.Entry<String, Integer> entry : allLem.entrySet()) {
             String lemmaText = entry.getKey();
             int countLemma = entry.getValue();
-            Lemma lemma = lemmaRepository.findByLemmaAndSiteId(lemmaText, siteEntity);
+            Lemma lemma = lemmaRepository.findByLemmaAndSite(lemmaText, siteEntity);
             if (lemma == null) {
                 lemma = new Lemma();
                 lemma.setLemma(lemmaText);
-                lemma.setSiteId(siteEntity);
+                lemma.setSite(siteEntity);
                 lemma.setFrequency(1);
             } else {
                 lemma.setFrequency(lemma.getFrequency() + 1);
             }
             lemmaRepository.save(lemma);
             Index index = new Index();
-            index.setPageId(page);
-            index.setLemmaId(lemma);
+            index.setPage(page);
+            index.setLemma(lemma);
             index.setRank(countLemma);
             indexRepository.save(index);
         }
     }
+
 
     public String getBaseUrl(String url) {
         int protocolIndex = url.indexOf("://");
@@ -197,6 +298,37 @@ public class IndexingSiteService {
         }
         String baseUrl = url.substring(0, end);
         return baseUrl;
+    }
+
+    private String getTitle(Page page) {
+        String title = "";
+        try {
+            String siteUrl = page.getSite().getUrl();
+            String fullUrl = siteUrl + page.getPath();
+            Document doc = Jsoup.connect(fullUrl).get();
+            title = doc.title();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return title;
+    }
+
+    private String getSnippet(Page page, Set<Lemma> lemma) {
+        String html = page.getContent();
+        String text = Jsoup.parse(html).text();
+        Set<String> words = lemma.stream()
+                .map(Lemma::getLemma)
+                .collect(Collectors.toSet());
+        for (String word : words) {
+            int pos = text.toLowerCase().indexOf(word.toLowerCase());
+            if (pos >= 0) {
+                int start = Math.max(0, pos - 50);
+                int end = Math.min(text.length(), pos + word.length() + 50);
+                return text.substring(start, end)
+                        .replaceAll("(?i)(" + word + ")", "<b>$1</b>");
+            }
+        }
+        return text.substring(0, Math.min(200, text.length())) + "...";
     }
 
 }

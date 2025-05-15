@@ -19,7 +19,7 @@ public class Lemma {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "site_id")
-    private SiteEntity siteId;
+    private SiteEntity site;
 
     @Column(name = "lemma")
     private String lemma;

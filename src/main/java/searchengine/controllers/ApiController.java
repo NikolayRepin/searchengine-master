@@ -43,4 +43,13 @@ public class ApiController {
         return indexingSiteService.indexPage(urlPage);
     }
 
+    @ResponseStatus(HttpStatus.OK)
+    @GetMapping("/search")
+    public ResponseBoolean search(@RequestParam String query,
+                                  @RequestParam String site,
+                                  @RequestParam Integer offset,
+                                  @RequestParam Integer limit) {
+        return indexingSiteService.search(query, site, offset, limit);
+    }
+
 }

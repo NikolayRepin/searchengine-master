@@ -83,19 +83,19 @@ public class PageCrawlerTask extends RecursiveAction {
             for (Map.Entry<String, Integer> entry : allLem.entrySet()) {
                 String lemmaText = entry.getKey();
                 int countLemma = entry.getValue();
-                Lemma lemma = lemmaRepository.findByLemmaAndSiteId(lemmaText, siteEntity);
+                Lemma lemma = lemmaRepository.findByLemmaAndSite(lemmaText, siteEntity);
                 if (lemma == null) {
                     lemma = new Lemma();
                     lemma.setLemma(lemmaText);
-                    lemma.setSiteId(siteEntity);
+                    lemma.setSite(siteEntity);
                     lemma.setFrequency(1);
                 } else {
                     lemma.setFrequency(lemma.getFrequency() + 1);
                 }
                 lemmaRepository.save(lemma);
                 Index index = new Index();
-                index.setPageId(page);
-                index.setLemmaId(lemma);
+                index.setPage(page);
+                index.setLemma(lemma);
                 index.setRank(countLemma);
                 indexRepository.save(index);
             }
@@ -164,7 +164,10 @@ public class PageCrawlerTask extends RecursiveAction {
         siteEntity.setStatus(StatusIndexingSite.FAILED);
         log.error("Ошибка 500 {}, Статус: {}", url, siteEntity.getStatus());
         updateStatusTime();
+        //Продумать вариант с тем, что может быть 500 на страницу
     }
+
+
 
     public void error404(Page page) {
         log.error("Ошибка 404 {}", url);
