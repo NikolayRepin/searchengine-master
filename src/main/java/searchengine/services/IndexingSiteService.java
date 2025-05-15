@@ -168,16 +168,39 @@ public class IndexingSiteService {
         if (query.isEmpty()) {
             return new ResponseError(false, "Задан пустой поисковый запрос");
         }
+        SiteEntity siteEntity = new SiteEntity();
+        List<SearchResult> searchResults = new ArrayList<>();
 
-        SiteEntity siteEntity = siteRepository.findByUrl(siteUrl);
-        if (siteEntity == null) {
-            return new ResponseError(false, "Указанный сайт не найден");
-        }
-        Set<Lemma> filteredLemmas = getRelevantLemma(query, siteEntity);
-        if (filteredLemmas.isEmpty()) {
-            return new ResponseError(false, "Ничего не найдено");
+        if (siteUrl == null || siteUrl.isEmpty()) {
+            log.info("Начинается поиск по всем страницам");
+            for (Site site : sitesList.getSites()) {
+                siteEntity = siteRepository.findByUrl(site.getUrl());
+                Set<Lemma> filteredLemmas = getRelevantLemma(query, siteEntity);
+                if (siteEntity != null) {
+                    singleSiteSearch(filteredLemmas, searchResults, query, siteEntity);
+                }
+            }
+        } else {
+            log.info("Начинается поиск по {}", siteUrl);
+            siteEntity = siteRepository.findByUrl(siteUrl);
+            if (siteEntity == null) {
+                return new ResponseError(false, "Указанный сайт не найден");
+            }
+            Set<Lemma> filteredLemmas = getRelevantLemma(query, siteEntity);
+            if (filteredLemmas.isEmpty()) {
+                return new ResponseError(false, "Ничего не найдено");
+            }
+            singleSiteSearch(filteredLemmas, searchResults, query, siteEntity);
         }
 
+
+        return new ResponseSearch(true, searchResults.size(), searchResults);
+    }
+
+    private void singleSiteSearch(Set<Lemma> filteredLemmas, List<SearchResult> searchResults, String query, SiteEntity siteEntity) {
+        if (filteredLemmas == null || filteredLemmas.isEmpty()){
+            return;
+        }
         List<Index> index = indexRepository.findByLemma(filteredLemmas.iterator().next());
         Set<Page> resultPages = index.stream()
                 .map(Index::getPage)
@@ -208,17 +231,16 @@ public class IndexingSiteService {
                 ))
                 .toList();
 
-        List<SearchResult> searchResults = new ArrayList<>();
         for (Page page : sortedPages) {
             String siteName = siteEntity.getName();
             String uri = page.getPath();
             String title = getTitle(page);
             String snippet = getSnippet(page, filteredLemmas);
             float relevance = absoluteRelevancePage.get(page) / maxAbsoluteRelevance;
-            searchResults.add(new SearchResult(siteUrl, siteName, uri, title, snippet, relevance));
+            searchResults.add(new SearchResult(siteEntity.getUrl(), siteName, uri, title, snippet, relevance));
         }
-        return new ResponseSearch(true, searchResults.size(), searchResults);
     }
+
 
     public Set<Lemma> getRelevantLemma(String text, SiteEntity siteEntity) {
         double percentageOfOccurrence = 0.8;
