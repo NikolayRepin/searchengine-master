@@ -193,12 +193,19 @@ public class IndexingSiteService {
             singleSiteSearch(filteredLemmas, searchResults, query, siteEntity);
         }
 
+        int currentOffset = offset == null ? 0 : offset;
+        int currentLimit = limit == null ? 20 : limit;
 
-        return new ResponseSearch(true, searchResults.size(), searchResults);
+        List<SearchResult> finalSearchResult = searchResults.stream()
+                .skip(currentOffset)
+                .limit(currentLimit)
+                .toList();
+
+        return new ResponseSearch(true, searchResults.size(), finalSearchResult);
     }
 
     private void singleSiteSearch(Set<Lemma> filteredLemmas, List<SearchResult> searchResults, String query, SiteEntity siteEntity) {
-        if (filteredLemmas == null || filteredLemmas.isEmpty()){
+        if (filteredLemmas == null || filteredLemmas.isEmpty()) {
             return;
         }
         List<Index> index = indexRepository.findByLemma(filteredLemmas.iterator().next());
