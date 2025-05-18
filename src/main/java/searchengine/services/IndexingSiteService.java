@@ -30,6 +30,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -200,7 +202,9 @@ public class IndexingSiteService {
                 .skip(currentOffset)
                 .limit(currentLimit)
                 .toList();
-
+        if (finalSearchResult.isEmpty()) {
+            return new ResponseError(false, "Ничего не найдено");
+        }
         return new ResponseSearch(true, searchResults.size(), finalSearchResult);
     }
 
@@ -242,7 +246,7 @@ public class IndexingSiteService {
             String siteName = siteEntity.getName();
             String uri = page.getPath();
             String title = getTitle(page);
-            String snippet = getSnippet(page, filteredLemmas);
+            String snippet = getSnippet(page, query);
             float relevance = absoluteRelevancePage.get(page) / maxAbsoluteRelevance;
             searchResults.add(new SearchResult(siteEntity.getUrl(), siteName, uri, title, snippet, relevance));
         }
@@ -250,7 +254,7 @@ public class IndexingSiteService {
 
 
     public Set<Lemma> getRelevantLemma(String text, SiteEntity siteEntity) {
-        double percentageOfOccurrence = 0.8;
+        double percentageOfOccurrence = 1.0;
         Set<Lemma> filteredLemmas = new TreeSet<>(Comparator.comparing(Lemma::getFrequency).thenComparing(Lemma::getLemma));
         try {
             LemmaFinder lemmaFinder = LemmaFinder.getInstance();
@@ -263,7 +267,7 @@ public class IndexingSiteService {
                     continue;
                 }
                 double count = countPageBySite * percentageOfOccurrence;
-                if (lemma.getFrequency() < count) {
+                if (lemma.getFrequency() <= count) {
                     filteredLemmas.add(lemma);
                 }
             }
@@ -342,22 +346,58 @@ public class IndexingSiteService {
         return title;
     }
 
-    private String getSnippet(Page page, Set<Lemma> lemma) {
+    private String getSnippet(Page page, String query) {
         String html = page.getContent();
         String text = Jsoup.parse(html).text();
-        Set<String> words = lemma.stream()
-                .map(Lemma::getLemma)
-                .collect(Collectors.toSet());
-        for (String word : words) {
-            int pos = text.toLowerCase().indexOf(word.toLowerCase());
-            if (pos >= 0) {
-                int start = Math.max(0, pos - 50);
-                int end = Math.min(text.length(), pos + word.length() + 50);
-                return text.substring(start, end)
-                        .replaceAll("(?i)(" + word + ")", "<b>$1</b>");
+        String[] words = query.split("\\s+");
+        Pattern pattern = Pattern.compile(query, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+        Matcher matcher = pattern.matcher(text);
+        int flag = 0;
+        int length = text.length();
+        String result = "";
+        if (matcher.find()) {
+            int startIndex = matcher.start();
+            int lastIndex = matcher.end();
+            int difference = length - lastIndex;
+            if ((lastIndex + 300) < length) {
+                int endStr = lastIndex + 300;
+                String str = text.substring(startIndex, endStr);
+                int firstSpace = str.lastIndexOf(" ", endStr);
+                result = str.substring(0, firstSpace) + " ...";
+            } else {
+                result = text.substring(startIndex, lastIndex + difference);
+            }
+        } else {
+            flag = -1;
+        }
+
+        if (flag == -1) {
+            for (String s : words) {
+                pattern = Pattern.compile(s, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+                matcher = pattern.matcher(text);
+                if (matcher.find()) {
+                    int startIndex = matcher.start();
+                    int lastIndex = matcher.end();
+                    int difference = length - lastIndex;
+                    if ((lastIndex + 300) < length) {
+                        int endStr = lastIndex + 300;
+                        String str = text.substring(startIndex, endStr);
+                        int firstSpace = str.lastIndexOf(" ", endStr);
+                        result = str.substring(0, firstSpace) + " ...";
+                    } else {
+                        result = text.substring(matcher.start(), lastIndex + difference);
+                    }
+                    break;
+                }
             }
         }
-        return text.substring(0, Math.min(200, text.length())) + "...";
+        for (String s : words) {
+            String escapedWord = Pattern.quote(s);
+            pattern = Pattern.compile(escapedWord, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+            matcher = pattern.matcher(result);
+            result = matcher.replaceAll("<b>$0</b>");
+        }
+        return result;
     }
-
 }
+
