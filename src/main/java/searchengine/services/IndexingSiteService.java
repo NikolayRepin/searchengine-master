@@ -349,24 +349,14 @@ public class IndexingSiteService {
     private String getSnippet(Page page, String query) {
         String html = page.getContent();
         String text = Jsoup.parse(html).text();
-        String[] words = query.split("\\s+");
+        String[] words = query.strip().split("\\s+");
         Pattern pattern = Pattern.compile(query, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
         Matcher matcher = pattern.matcher(text);
         int flag = 0;
         int length = text.length();
         String result = "";
         if (matcher.find()) {
-            int startIndex = matcher.start();
-            int lastIndex = matcher.end();
-            int difference = length - lastIndex;
-            if ((lastIndex + 300) < length) {
-                int endStr = lastIndex + 300;
-                String str = text.substring(startIndex, endStr);
-                int firstSpace = str.lastIndexOf(" ", endStr);
-                result = str.substring(0, firstSpace) + " ...";
-            } else {
-                result = text.substring(startIndex, lastIndex + difference);
-            }
+            result = findMatchCondition(matcher, length, text, result);
         } else {
             flag = -1;
         }
@@ -376,17 +366,7 @@ public class IndexingSiteService {
                 pattern = Pattern.compile(s, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
                 matcher = pattern.matcher(text);
                 if (matcher.find()) {
-                    int startIndex = matcher.start();
-                    int lastIndex = matcher.end();
-                    int difference = length - lastIndex;
-                    if ((lastIndex + 300) < length) {
-                        int endStr = lastIndex + 300;
-                        String str = text.substring(startIndex, endStr);
-                        int firstSpace = str.lastIndexOf(" ", endStr);
-                        result = str.substring(0, firstSpace) + " ...";
-                    } else {
-                        result = text.substring(matcher.start(), lastIndex + difference);
-                    }
+                    result = findMatchCondition(matcher, length, text, result);
                     break;
                 }
             }
@@ -398,6 +378,22 @@ public class IndexingSiteService {
             result = matcher.replaceAll("<b>$0</b>");
         }
         return result;
+    }
+
+    private String findMatchCondition(Matcher matcher, int length, String text, String result) {
+        int startIndex = matcher.start();
+        int lastIndex = matcher.end();
+        int difference = length - lastIndex;
+        if ((lastIndex + 300) < length) {
+            int endStr = lastIndex + 300;
+            String str = text.substring(startIndex, endStr);
+            int firstSpace = str.lastIndexOf(" ", endStr);
+            result = str.substring(0, firstSpace) + " ...";
+            return result;
+        } else {
+            result = text.substring(startIndex, lastIndex + difference);
+            return result;
+        }
     }
 }
 

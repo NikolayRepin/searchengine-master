@@ -136,7 +136,12 @@ public class PageCrawlerTask extends RecursiveAction {
                 error404(page);
             }
             if (statusCode == 500) {
-                error500();
+                boolean isRootUrl = url.equals(siteEntity.getUrl()) || url.equals(siteEntity.getUrl() + "/");
+                if (isRootUrl) {
+                    error500();
+                } else {
+                    error500ForPage(page);
+                }
             }
         } catch (IOException e) {
             e.printStackTrace();
@@ -164,9 +169,16 @@ public class PageCrawlerTask extends RecursiveAction {
         siteEntity.setStatus(StatusIndexingSite.FAILED);
         log.error("Ошибка 500 {}, Статус: {}", url, siteEntity.getStatus());
         updateStatusTime();
-        //Продумать вариант с тем, что может быть 500 на страницу
     }
 
+    public void error500ForPage(Page page) {
+        log.error("Ошибка 500 {}", url);
+        page.setSite(siteEntity);
+        page.setPath(url.substring(siteEntity.getUrl().length()));
+        page.setCode(500);
+        page.setContent("");
+        pageRepository.save(page);
+    }
 
 
     public void error404(Page page) {
