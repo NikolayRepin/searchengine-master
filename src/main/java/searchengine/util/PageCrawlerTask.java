@@ -1,6 +1,5 @@
 package searchengine.util;
 
-import liquibase.pro.packaged.P;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Connection;
 import org.jsoup.HttpStatusException;
@@ -8,7 +7,6 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-import org.springframework.transaction.annotation.Transactional;
 import searchengine.config.SitesList;
 import searchengine.model.*;
 import searchengine.repository.IndexRepository;
@@ -21,6 +19,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RecursiveAction;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 @Slf4j
@@ -38,7 +37,7 @@ public class PageCrawlerTask extends RecursiveAction {
     private static Set<String> visitedSite = ConcurrentHashMap.newKeySet();
     private static final Pattern FILE_PATTERN = Pattern
             .compile(".*\\.(jpg|jpeg|png|gif|bmp|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|tar|gz|7z|mp3|wav|mp4|mkv|avi|mov|sql|webp|svg)$", Pattern.CASE_INSENSITIVE);
-
+    private static final ConcurrentHashMap<SiteEntity, AtomicInteger> activeTasks = new ConcurrentHashMap<>();
 
     public PageCrawlerTask(String url, String defaultUrl, PageRepository pageRepository, SiteRepository siteRepository, LemmaRepository lemmaRepository, IndexRepository indexRepository, SitesList sitesList, SiteEntity siteEntity) {
         this.url = url;
@@ -49,105 +48,115 @@ public class PageCrawlerTask extends RecursiveAction {
         this.indexRepository = indexRepository;
         this.sitesList = sitesList;
         this.siteEntity = siteEntity;
-
+        activeTasks.computeIfAbsent(siteEntity, k -> new AtomicInteger(0)).incrementAndGet();
     }
 
     @Override
     protected void compute() {
-
-
-        if (visitedSite.contains(url)) {
-            return;
-        }
-        if (Thread.currentThread().isInterrupted() || getPool().isShutdown()) {
-            Thread.currentThread().interrupt();
-            return;
-        }
-        visitedSite.add(url);
-
-        Page page = new Page();
-        page.setPath(url.substring(siteEntity.getUrl().length()));
         try {
-            Connection.Response response = connection();
 
-            updateStatusTime();
-            page.setSite(siteEntity);
-            page.setCode(response.statusCode());
-            page.setContent(response.body().replace("\u0000", ""));
-            log.info("Сохранение страницы {}", url);
-            pageRepository.save(page);
-
-            LemmaFinder lemmaFinder = LemmaFinder.getInstance();
-            Map<String, Integer> allLem = lemmaFinder.collectLemmas(page.getContent());
-
-            for (Map.Entry<String, Integer> entry : allLem.entrySet()) {
-                String lemmaText = entry.getKey();
-                int countLemma = entry.getValue();
-                Lemma lemma = lemmaRepository.findByLemmaAndSite(lemmaText, siteEntity);
-                if (lemma == null) {
-                    lemma = new Lemma();
-                    lemma.setLemma(lemmaText);
-                    lemma.setSite(siteEntity);
-                    lemma.setFrequency(1);
-                } else {
-                    lemma.setFrequency(lemma.getFrequency() + 1);
-                }
-                lemmaRepository.save(lemma);
-                Index index = new Index();
-                index.setPage(page);
-                index.setLemma(lemma);
-                index.setRank(countLemma);
-                indexRepository.save(index);
+            if (visitedSite.contains(url)) {
+                return;
             }
+            if (Thread.currentThread().isInterrupted() || getPool().isShutdown()) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            visitedSite.add(url);
+
+            Page page = new Page();
+            page.setPath("/" + url.substring(siteEntity.getUrl().length()));
+            try {
+                Connection.Response response = connection();
+
+                updateStatusTime();
+                page.setSite(siteEntity);
+                page.setCode(response.statusCode());
+                page.setContent(response.body().replace("\u0000", ""));
+                log.info("Сохранение страницы {}", url);
+                pageRepository.save(page);
+
+                LemmaFinder lemmaFinder = LemmaFinder.getInstance();
+                Map<String, Integer> allLem = lemmaFinder.collectLemmas(page.getContent());
+
+                for (Map.Entry<String, Integer> entry : allLem.entrySet()) {
+                    String lemmaText = entry.getKey();
+                    int countLemma = entry.getValue();
+                    Lemma lemma = lemmaRepository.findByLemmaAndSite(lemmaText, siteEntity);
+                    if (lemma == null) {
+                        lemma = new Lemma();
+                        lemma.setLemma(lemmaText);
+                        lemma.setSite(siteEntity);
+                        lemma.setFrequency(1);
+                    } else {
+                        lemma.setFrequency(lemma.getFrequency() + 1);
+                    }
+                    lemmaRepository.save(lemma);
+                    Index index = new Index();
+                    index.setPage(page);
+                    index.setLemma(lemma);
+                    index.setRank(countLemma);
+                    indexRepository.save(index);
+                }
 
 
-            Document doc = response.parse();
-            Elements elements = doc.select("a");
-            List<PageCrawlerTask> tasks = new ArrayList<>();
-            for (Element element : elements) {
-                if (Thread.currentThread().isInterrupted() || getPool().isShutdown()) {
-                    Thread.currentThread().interrupt();
-                    return;
+                Document doc = response.parse();
+                Elements elements = doc.select("a");
+                List<PageCrawlerTask> tasks = new ArrayList<>();
+                for (Element element : elements) {
+                    if (Thread.currentThread().isInterrupted() || getPool().isShutdown()) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    String href = element.attr("abs:href").trim();
+                    if (isValid(href)) {
+                        PageCrawlerTask pageCrawlerTask = new PageCrawlerTask(href, defaultUrl, pageRepository, siteRepository, lemmaRepository, indexRepository, sitesList, siteEntity);
+                        tasks.add(pageCrawlerTask);
+                        pageCrawlerTask.fork();
+
+                    }
                 }
-                String href = element.attr("abs:href").trim();
-                if (isValid(href)) {
-                    PageCrawlerTask pageCrawlerTask = new PageCrawlerTask(href, defaultUrl, pageRepository, siteRepository, lemmaRepository, indexRepository, sitesList, siteEntity);
-                    pageCrawlerTask.fork();
-                    tasks.add(pageCrawlerTask);
+                for (PageCrawlerTask task : tasks) {
+                    if (Thread.currentThread().isInterrupted() || getPool().isShutdown()) {
+                        Thread.currentThread().interrupt();
+                        indexingStoppedByUser();
+                        return;
+                    }
+                    task.join();
+
                 }
+
+            } catch (HttpStatusException e) {
+                e.printStackTrace();
+                int statusCode = e.getStatusCode();
+                if (statusCode == 404) {
+                    error404(page);
+                }
+                if (statusCode == 500) {
+                    boolean isRootUrl = url.equals(siteEntity.getUrl()) || url.equals(siteEntity.getUrl() + "/");
+                    if (isRootUrl) {
+                        error500();
+                    } else {
+                        error500ForPage(page);
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+                log.error("Ошибка ввода-вывода {}", url, e.getMessage());
             }
-            for (PageCrawlerTask task : tasks) {
-                if (Thread.currentThread().isInterrupted() || getPool().isShutdown()) {
-                    Thread.currentThread().interrupt();
-                    indexingStoppedByUser();
-                    return;
-                }
-                task.join();
+        } finally {
+            AtomicInteger counter = activeTasks.get(siteEntity);
+            if (Thread.currentThread().isInterrupted() || getPool().isShutdown()) {
+                Thread.currentThread().interrupt();
+                indexingStoppedByUser();
+                return;
             }
-            if (url.equals(defaultUrl)) {
+            if (counter != null && counter.decrementAndGet() == 0) {
                 successfulIndexing();
+                activeTasks.remove(siteEntity);
             }
 
-
-        } catch (HttpStatusException e) {
-            e.printStackTrace();
-            int statusCode = e.getStatusCode();
-            if (statusCode == 404) {
-                error404(page);
-            }
-            if (statusCode == 500) {
-                boolean isRootUrl = url.equals(siteEntity.getUrl()) || url.equals(siteEntity.getUrl() + "/");
-                if (isRootUrl) {
-                    error500();
-                } else {
-                    error500ForPage(page);
-                }
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-            log.error("Ошибка ввода-вывода {}", url, e.getMessage());
         }
-
     }
 
     private boolean isValid(String url) {
@@ -191,11 +200,15 @@ public class PageCrawlerTask extends RecursiveAction {
     }
 
     public void successfulIndexing() {
-        siteEntity.setStatus(StatusIndexingSite.INDEXED);
-        siteEntity.setLastError("");
-        siteEntity.setStatusTime(Instant.now());
-        log.info("Сайт {} успешно проиндексирован", defaultUrl);
-        siteRepository.save(siteEntity);
+        synchronized (siteEntity) {
+            if (activeTasks.getOrDefault(siteEntity, new AtomicInteger(0)).get() == 0) {
+                siteEntity.setStatus(StatusIndexingSite.INDEXED);
+                siteEntity.setLastError("");
+                siteEntity.setStatusTime(Instant.now());
+                siteRepository.save(siteEntity);
+                log.info("Сайт {} успешно проиндексирован", defaultUrl);
+            }
+        }
     }
 
     public void indexingStoppedByUser() {
@@ -213,6 +226,7 @@ public class PageCrawlerTask extends RecursiveAction {
     public static void clearVisitedSite() {
         visitedSite.clear();
     }
+
 
 
 }
