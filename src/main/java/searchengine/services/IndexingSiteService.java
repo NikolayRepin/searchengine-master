@@ -370,13 +370,38 @@ public class IndexingSiteService {
                     break;
                 }
             }
+            int a = 1;
+            String newWords = "";
+            if (result.isEmpty()) {
+                for (String s : words) {
+                    for (int i = 0; i <= s.length(); i++) {
+                        newWords = s.substring(0, s.length() - a);
+                        pattern = Pattern.compile(newWords, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+                        matcher = pattern.matcher(text);
+                        if (matcher.find()) {
+                            result = findMatchCondition(matcher, length, text, result);
+                            break;
+                        }
+                        a++;
+                    }
+
+                    result = boldFont(newWords, pattern, matcher, result);
+                }
+                return result;
+            }
         }
+
         for (String s : words) {
-            String escapedWord = Pattern.quote(s);
-            pattern = Pattern.compile(escapedWord, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
-            matcher = pattern.matcher(result);
-            result = matcher.replaceAll("<b>$0</b>");
+            result = boldFont(s, pattern, matcher, result);
         }
+        return result;
+    }
+
+    private String boldFont(String str, Pattern pattern, Matcher matcher, String result) {
+        String escapedWord = Pattern.quote(str);
+        pattern = Pattern.compile(escapedWord, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+        matcher = pattern.matcher(result);
+        result = matcher.replaceAll("<b>$0</b>");
         return result;
     }
 
