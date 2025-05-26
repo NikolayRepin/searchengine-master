@@ -336,11 +336,9 @@ public class IndexingSiteService {
     private String getTitle(Page page) {
         String title = "";
         try {
-            String siteUrl = page.getSite().getUrl();
-            String fullUrl = siteUrl + page.getPath();
-            Document doc = Jsoup.connect(fullUrl).get();
+            Document doc = Jsoup.parse(page.getContent());
             title = doc.title();
-        } catch (IOException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
         return title;
