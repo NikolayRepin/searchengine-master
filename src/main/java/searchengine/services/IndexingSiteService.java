@@ -374,17 +374,21 @@ public class IndexingSiteService {
             String newWords = "";
             if (result.isEmpty()) {
                 for (String s : words) {
+
                     for (int i = 0; i <= s.length(); i++) {
-                        newWords = s.substring(0, s.length() - a);
-                        pattern = Pattern.compile(newWords, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
-                        matcher = pattern.matcher(text);
-                        if (matcher.find()) {
-                            result = findMatchCondition(matcher, length, text, result);
+                        if (a <= 3) {
+                            newWords = s.substring(0, s.length() - a);
+                            pattern = Pattern.compile(newWords, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+                            matcher = pattern.matcher(text);
+                            if (matcher.find()) {
+                                result = findMatchCondition(matcher, length, text, result);
+                                break;
+                            }
+                            a++;
+                        } else {
                             break;
                         }
-                        a++;
                     }
-
                     result = boldFont(newWords, pattern, matcher, result);
                 }
                 return result;

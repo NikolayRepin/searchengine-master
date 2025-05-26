@@ -30,8 +30,6 @@ indexing-settings:
       name: RuWeb.ru
     - url: https://www.svetlovka.ru
       name: Svetlovka
-    - url:  https://sendel.ru/
-      name:  sendel
   user-agent: HeliontSearchBot
   referrer: http://www.google.com
   request-delay: 1000
