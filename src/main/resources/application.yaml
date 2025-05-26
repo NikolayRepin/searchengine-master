@@ -26,14 +26,12 @@ indexing-settings:
   sites:
 #    - url: https://volochek.life/
 #      name: volochek.life
-#    - url: https://ruweb.net
-#      name: RuWeb.ru
-#    - url: https://www.svetlovka.ru
-#      name: Svetlovka
-    - url: https://www.playback.ru/
-      name: PlayBack.Ru
-#    - url:  https://sendel.ru/
-#      name:  sendel
+    - url: https://ruweb.net
+      name: RuWeb.ru
+    - url: https://www.svetlovka.ru
+      name: Svetlovka
+    - url:  https://sendel.ru/
+      name:  sendel
   user-agent: HeliontSearchBot
   referrer: http://www.google.com
   request-delay: 1000
